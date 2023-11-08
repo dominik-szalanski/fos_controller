@@ -5,17 +5,22 @@ import json
 import signal
 import functools
 import subprocess
+import time
 from asyncio.subprocess import PIPE, STDOUT
 from pprint import pp
 import logging
 from logging.handlers import RotatingFileHandler
+import sys
+import os
 
 shutdown = False
 
 running_fos = {}
 binary_name = 'fos'
+binary_flags = ''
+gateio_future_websocket_url = 'wss://fxws-private.gateapi.io:443/v4/ws/'
 ws_monitoring_timeout = 600 
-connection_count = 40 
+connection_count = 20 
 connect_delay_s = 61 
 
 async def main(args):
@@ -48,14 +53,14 @@ async def main(args):
             response = await websocket.recv()
         except (websockets.exceptions.ConnectionClosed,websockets.exceptions.ConnectionClosedError,websockets.exceptions.ConnectionClosedOK):
             killall_fos()
-    times.sleep(10)
+    time.sleep(10)
     killall_fos()
     
 async def spawn_fos(fos_args:dict, ws_address:str, process_id:str):
     global running_fos
-    
-    logger.log(logging.INFO,f"spawn new fos {process_id}")
-    process = await asyncio.create_subprocess_shell(f'./{binary_name} -p {process_id} -r {fos_args.get("reference_instrument_symbol").lower()} -t {fos_args.get("trading_instrument_symbol")} -s {ws_address} -c {fos_args.get("monitor_order_channel_name")} --api-key {fos_args.get("api_key")} --api-secret {fos_args.get("api_secrect")} --connection-count {connection_count} --connect-delay-s {connect_delay_s} > {process_id}.log', stdin = PIPE, stdout = STDOUT, stderr = STDOUT)
+    fos_log_file = open(f'{process_id}.log','w')
+    logger.log(logging.INFO,f"spawn new fos {process_id} binary {binary_name}")
+    process = await asyncio.create_subprocess_shell(f'./{binary_name} -p {process_id} -r {fos_args.get("reference_instrument_symbol").lower()} -t {fos_args.get("trading_instrument_symbol")} -s {ws_address} -c {fos_args.get("monitor_order_channel_name")} --api-key {fos_args.get("api_key")} --api-secret {fos_args.get("api_secrect")} --connection-count {connection_count} --connect-delay-s {connect_delay_s} -exchange {fos_args.get("exchange")} --gateio-future-websocket-url {gateio_future_websocket_url}', stdin = PIPE, stdout = fos_log_file, stderr = fos_log_file)
     async with websockets.connect(ws_address) as websocket:
         login_dict = {'op':'login','origin':process_id}
         await websocket.send(json.dumps(login_dict))
@@ -70,7 +75,7 @@ async def spawn_fos(fos_args:dict, ws_address:str, process_id:str):
             except asyncio.TimeoutError:
                 timeout = True
                 logger.log(logging.INFO,f"no message for {ws_monitoring_timeout} received for process {process_id}")
-    process.send_signal(signal.SIGTERM)
+    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
     logger.log(logging.INFO,f"despawn fos {process_id}")
     running_fos.pop(process_id, None)
 
@@ -92,8 +97,6 @@ async def mainFunction(args):
     main_event_loop = asyncio.get_event_loop()
     main_event_loop.add_signal_handler(signal.SIGTERM, functools.partial(soft_signal_handler, signal.SIGTERM))
     main_event_loop.add_signal_handler(signal.SIGINT, functools.partial(soft_signal_handler, signal.SIGINT))
-    main_event_loop.add_signal_handler(signal.SIGKILL, functools.partial(hard_signal_handler, signal.SIGINT))
-    main_event_loop.add_signal_handler(signal.SIGILL, functools.partial(hard_signal_handler, signal.SIGINT))
     await asyncio.create_task(main(args))
 
 
@@ -103,7 +106,7 @@ if __name__ == '__main__':
     argParser.add_argument("-p", "--process_id", help="process id prefix", type=str)
     argParser.add_argument("-s", "--strategyserver", help="address for strategyserver", type=str)
     args = argParser.parse_args()
-    if not (args.config is None or (args.process_id is None or args.strategyserver is None)):
+    if (args.config is None) and (args.process_id is None or args.strategyserver is None):
         print(f'config or mandatory arguments missing: {args}')
         exit(1)
     if args.config is not None:
@@ -112,11 +115,13 @@ if __name__ == '__main__':
             if args.process_id is None:
                 args.process_id = config_dict.get('process_id')
             if args.strategyserver is None:
-                args.strategyserver = config_infile.get('strategyserver')
-            binary_name = binary_name if config_infile.get('binary_name') is None else config_infile.get('binary_name')
-            ws_monitoring_timeout = ws_monitoring_timeout if config_infile.get('ws_monitoring_timeout') is None else config_infile.get('ws_monitoring_timeout')
-            connection_count = connection_count if config_infile.get('connection_count') is None else config_infile.get('connection_count')
-            connect_delay_s = connect_delay_s if config_infile.get('connect_delay_s') is None else config_infile.get('connect_delay_s')
+                args.strategyserver = config_dict.get('strategyserver')
+            binary_name = binary_name if config_dict.get('binary_name') is None else config_dict.get('binary_name')
+            binary_flags = binary_flags if config_dict.get('binary_flags') is None else config_dict.get('binary_flags')
+            ws_monitoring_timeout = ws_monitoring_timeout if config_dict.get('ws_monitoring_timeout') is None else config_dict.get('ws_monitoring_timeout')
+            connection_count = connection_count if config_dict.get('connection_count') is None else config_dict.get('connection_count')
+            connect_delay_s = connect_delay_s if config_dict.get('connect_delay_s') is None else config_dict.get('connect_delay_s')
+            gateio_future_websocket_url = gateio_future_websocket_url if config_dict.get('gateio_future_websocket_url') is None else config_dict.get('gateio_future_websocket_url')
     logfile = 'fos_controller.log'
     loglevel = logging.INFO
     logging.basicConfig(filename=logfile,filemode='w+',level=loglevel,format='%(asctime)s %(levelname)s - %(name)s - %(message)s')
