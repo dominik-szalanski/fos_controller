@@ -60,7 +60,7 @@ async def spawn_fos(fos_args:dict, ws_address:str, process_id:str):
     global running_fos
     fos_log_file = open(f'{process_id}.log','w')
     logger.log(logging.INFO,f"spawn new fos {process_id} binary {binary_name}")
-    process = await asyncio.create_subprocess_shell(f'./{binary_name} -p {process_id} -r {fos_args.get("reference_instrument_symbol").lower()} -t {fos_args.get("trading_instrument_symbol")} -s {ws_address} -c {fos_args.get("monitor_order_channel_name")} --api-key {fos_args.get("api_key")} --api-secret {fos_args.get("api_secrect")} --connection-count {connection_count} --connect-delay-s {connect_delay_s} -exchange {fos_args.get("exchange")} --gateio-future-websocket-url {gateio_future_websocket_url}', stdin = PIPE, stdout = fos_log_file, stderr = fos_log_file)
+    process = await asyncio.create_subprocess_shell(f'./{binary_name} -p {process_id} -r {fos_args.get("reference_instrument_symbol").lower()} -t {fos_args.get("trading_instrument_symbol")} -s {ws_address} -c {fos_args.get("monitor_order_channel_name")} --api-key {fos_args.get("api_key")} --api-secret {fos_args.get("api_secrect")} --connection-count {connection_count} --connect-delay-s {connect_delay_s} --exchange {fos_args.get("exchange")} --gateio-future-websocket-url {gateio_future_websocket_url}', stdin = PIPE, stdout = fos_log_file, stderr = fos_log_file)
     async with websockets.connect(ws_address) as websocket:
         login_dict = {'op':'login','origin':process_id}
         await websocket.send(json.dumps(login_dict))
